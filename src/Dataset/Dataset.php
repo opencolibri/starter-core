@@ -10,12 +10,13 @@ use Symfony\Component\Yaml\Yaml;
  * A catalog ready to be loaded into Sylius, in a directory:
  *
  *     dataset.yaml       name, description, url, source, theme, created_at (all optional)
- *     products.yaml      products: [{title, description, collection_name, price_eur, image}]
- *     collections.yaml   collections: [{name, image, parent}]
+ *     products.yaml      products: [{title, description, collection_name | collection, price_eur, image, code}]
+ *     collections.yaml   collections: [{name, code, parent, image}]
  *     media/             the images the YAML points at ("media/<file>.webp")
  *
- * A product belongs to the collection named by collection_name. A collection with a parent (the name of another
- * collection) is shown under it in the shop menu. An image is a path relative to the dataset directory; a remote URL
+ * A product belongs to the collection named by collection_name, or of code collection (a grouped menu may repeat a
+ * collection name across groups: its collections have a code). A collection with a parent (the code or name of
+ * another collection) is shown under it in the shop menu. code (optional) keeps the product code stable. An image is a path relative to the dataset directory; a remote URL
  * or an image_prompt is only a leftover of a dataset whose images were not stored yet (sylius:dataset:images).
  *
  * The format is final: loading a dataset needs neither the source site nor an AI.
