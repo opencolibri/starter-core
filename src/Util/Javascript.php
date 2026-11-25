@@ -65,4 +65,26 @@ final readonly class Javascript
 
         fs()->dumpFile($realFile, $content);
     }
+
+    /**
+     * Removes the imports of a Composer package assets ("import '@vendor/<package>/…';") from the shop and admin
+     * entrypoints, the way Sylius-Standard wires the payment plugins it ships.
+     */
+    public static function removeVendorImports(App $app, string $package): void
+    {
+        foreach (['assets/shop/entrypoint.js', 'assets/admin/entrypoint.js'] as $file) {
+            $realFile = $app->directory() . '/' . $file;
+
+            if (!is_file($realFile)) {
+                continue;
+            }
+
+            $content = fs()->readFile($realFile);
+            $replaced = preg_replace('/^import\s+[\'"]@vendor\/' . preg_quote($package, '/') . '\/[^\'"]*[\'"];?[^\S\r\n]*\R?/m', '', $content);
+
+            if (null !== $replaced && $replaced !== $content) {
+                fs()->dumpFile($realFile, $replaced);
+            }
+        }
+    }
 }
