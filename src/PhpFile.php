@@ -406,6 +406,25 @@ final class PhpFile
         return $this;
     }
 
+    /**
+     * Removes the methods of the class with these names, the ones it does not have are skipped.
+     */
+    public function removeMethod(string ...$names): static
+    {
+        $class = $this->findClass();
+
+        if (null === $class) {
+            return $this;
+        }
+
+        $class->stmts = array_values(array_filter(
+            $class->stmts,
+            static fn(Node\Stmt $stmt): bool => !$stmt instanceof ClassMethod || !\in_array($stmt->name->toString(), $names, true),
+        ));
+
+        return $this;
+    }
+
     public function appendToMethod(
         string $method,
         string $body,

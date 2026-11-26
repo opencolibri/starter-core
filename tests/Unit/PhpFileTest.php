@@ -377,6 +377,33 @@ final class PhpFileTest extends TestCase
         static::assertStringContainsString('public function foo(): void', $content);
     }
 
+    public function testRemoveMethod(): void
+    {
+        $filePath = $this->createFilePath();
+
+        (new PhpFile($filePath))
+            ->addMethod(<<<'PHP'
+                public function getState(): string
+                {
+                    return $this->state;
+                }
+
+                public function setState(string $state): void
+                {
+                    $this->state = $state;
+                }
+                PHP)
+            ->save();
+
+        (new PhpFile($filePath))->removeMethod('getState', 'unknown')->save();
+
+        $content = file_get_contents($filePath);
+
+        static::assertIsString($content);
+        static::assertStringNotContainsString('function getState', $content);
+        static::assertStringContainsString('public function setState(string $state): void', $content);
+    }
+
     public function testAddMethodWithNoClassReturnsThis(): void
     {
         $filePath = $this->tempDir . '/no_class.php';
