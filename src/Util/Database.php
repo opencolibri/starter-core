@@ -262,6 +262,17 @@ final readonly class Database
     }
 
     /**
+     * Deletes a generated migration that ran, without rolling it back: its changes stay, as if made without a migration.
+     *
+     * @param string $path see generatePluginMigration()
+     */
+    public static function forgetGeneratedMigration(App $app, string $path): void
+    {
+        Docker::run($app, \sprintf('bin/console doctrine:migrations:version --delete --no-interaction %s', escapeshellarg('DoctrineMigrations\\' . basename($path, '.php'))));
+        fs()->remove($path);
+    }
+
+    /**
      * @return list<string> the migrations of the namespace a plugin ships, executed or not
      */
     public static function pluginMigrations(App $app, string $namespace): array

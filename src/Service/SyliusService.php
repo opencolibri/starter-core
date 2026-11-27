@@ -30,6 +30,8 @@ class SyliusService extends SymfonyService
         $this->addExtension('gd');
         $this->addExtension('imagick');
         $this->addExtension('exif');
+        // The VIES client of the EU VAT plugin.
+        $this->addExtension('soap');
     }
 
     public function getTasks(): iterable
