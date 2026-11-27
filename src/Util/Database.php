@@ -226,6 +226,42 @@ final readonly class Database
     }
 
     /**
+     * @param list<string> $descriptions the descriptions generatePluginMigration() gave them
+     *
+     * @return list<string> the paths of the migrations generated for a plugin, in their order
+     */
+    public static function generatedMigrations(App $app, array $descriptions): array
+    {
+        $markers = array_map(static fn(string $description): string => var_export($description, true), $descriptions);
+
+        return array_values(array_filter(
+            self::migrationFiles($app),
+            static fn(string $path): bool => [] !== array_filter($markers, static fn(string $marker): bool => str_contains(fs()->readFile($path), 'return ' . $marker . ';')),
+        ));
+    }
+
+    /**
+     * Rolls back the generated migrations of a plugin that never left this application, the last one first, and
+     * deletes them: nothing else ran them, so no environment needs a migration dropping its tables.
+     *
+     * @param list<string> $paths see generatedMigrations()
+     */
+    public static function discardGeneratedMigrations(App $app, array $paths): void
+    {
+        $listed = Docker::run($app, 'bin/console doctrine:migrations:list --no-interaction --no-ansi')->getOutput();
+
+        foreach (array_reverse($paths) as $path) {
+            $migration = 'DoctrineMigrations\\' . basename($path, '.php');
+
+            if (preg_match(\sprintf('/^\|\s*%s\s+\|\s+migrated\s+\|/m', preg_quote($migration, '/')), $listed)) {
+                Docker::run($app, \sprintf('bin/console doctrine:migrations:execute --down --no-interaction %s', escapeshellarg($migration)));
+            }
+
+            fs()->remove($path);
+        }
+    }
+
+    /**
      * @return list<string> the migrations of the namespace a plugin ships, executed or not
      */
     public static function pluginMigrations(App $app, string $namespace): array
