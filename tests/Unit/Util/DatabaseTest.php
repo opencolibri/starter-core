@@ -6,6 +6,7 @@ namespace OpenColibri\Starter\Core\Tests\Unit\Util;
 
 use OpenColibri\Starter\Core\Util\Database;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 #[CoversClass(Database::class)]
@@ -131,5 +132,64 @@ final class DatabaseTest extends TestCase
             PHP;
 
         static::assertSame($code, Database::skipWhenNothingToDrop($code, 'Add the SEO plugin'));
+    }
+
+    private const string REMOVAL = <<<'PHP'
+        final class Version20261127120000 extends AbstractMigration
+        {
+            public function getDescription(): string
+            {
+                return 'Remove the SEO plugin';
+            }
+
+            public function up(Schema $schema): void
+            {
+                $this->skipIf(!$schema->hasTable('dedi_seo'), 'Nothing to drop.');
+                $this->addSql('DROP SEQUENCE dedi_seo_id_seq CASCADE');
+                $this->addSql('ALTER TABLE sylius_product DROP CONSTRAINT FK_SEO');
+                $this->addSql('ALTER TABLE sylius_product DROP seo_id');
+                $this->addSql('DROP TABLE dedi_seo');
+                $this->addSql('DELETE FROM sylius_migrations WHERE version = ?', ['Dedi\\Migrations\\Version1']);
+            }
+
+            public function down(Schema $schema): void
+            {
+                $this->addSql('CREATE SEQUENCE dedi_seo_id_seq INCREMENT BY 1 MINVALUE 1 START 1');
+                $this->addSql('CREATE TABLE dedi_seo (id INT NOT NULL, PRIMARY KEY (id))');
+                $this->addSql('ALTER TABLE sylius_product ADD seo_id INT DEFAULT NULL');
+            }
+        }
+        PHP;
+
+    public function testCheckPluginMigrationAcceptsTheExpectedMigration(): void
+    {
+        $this->expectNotToPerformAssertions();
+
+        Database::checkPluginMigration(self::REMOVAL, ['dedi_seo', 'sylius_product'], 'Remove the SEO plugin', ['Dedi\\Migrations\\Version1']);
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function provideUnexpectedMigrations(): iterable
+    {
+        yield 'no description' => [str_replace("return 'Remove the SEO plugin';", "return '';", self::REMOVAL), 'its description is not set'];
+        yield 'another sequence' => [str_replace('DROP SEQUENCE dedi_seo_id_seq', 'DROP SEQUENCE messenger_messages_id_seq', self::REMOVAL), 'sequence "messenger_messages_id_seq"'];
+        yield 'table dropped first' => [str_replace(
+            ["\$this->addSql('ALTER TABLE sylius_product DROP seo_id');", "\$this->addSql('DROP TABLE dedi_seo');", '__DROP__'],
+            ['__DROP__', "\$this->addSql('ALTER TABLE sylius_product DROP seo_id');", "\$this->addSql('DROP TABLE dedi_seo');"],
+            self::REMOVAL,
+        ), 'up() drops a table before other statements'];
+        yield 'no skip' => [str_replace("\$this->skipIf(!\$schema->hasTable('dedi_seo'), 'Nothing to drop.');", '', self::REMOVAL), 'without skipping'];
+        yield 'migration kept' => [str_replace("'Dedi\\\\Migrations\\\\Version1'", "'Other'", self::REMOVAL), 'does not forget the migration'];
+    }
+
+    #[DataProvider('provideUnexpectedMigrations')]
+    public function testCheckPluginMigrationRejectsAnUnexpectedMigration(string $code, string $error): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage($error);
+
+        Database::checkPluginMigration($code, ['dedi_seo', 'sylius_product'], 'Remove the SEO plugin', ['Dedi\\Migrations\\Version1']);
     }
 }

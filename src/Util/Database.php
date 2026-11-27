@@ -88,8 +88,14 @@ final readonly class Database
             array_unique([...array_keys($before), ...array_keys($after)]),
             static fn(string $table): bool => ($before[$table] ?? null) !== ($after[$table] ?? null),
         ));
-        $tables = array_map(static fn(string $table): string => preg_quote($table, '/'), $tables);
         $migrations = self::migrationFiles($app);
+
+        if ([] !== $tables) {
+            // Tables another package updated by Composer changed too would show up here: list them, to spot it.
+            io()->note(\sprintf('%s: migration of the tables %s.', $description, implode(', ', $tables)));
+        }
+
+        $tables = array_map(static fn(string $table): string => preg_quote($table, '/'), $tables);
 
         if ([] !== $tables) {
             // The tables and their id sequences (PostgreSQL): the sequences of the Sylius tables a plugin adds columns to
@@ -132,9 +138,91 @@ final readonly class Database
             )));
         }
 
+        try {
+            self::checkPluginMigration($code, $tables, $description, $forgottenMigrations);
+        } catch (\RuntimeException $exception) {
+            // Out of the migrations folder, so the next migrate does not run it.
+            fs()->rename($path, $path . '.rejected', true);
+
+            throw new \RuntimeException(\sprintf('The migration generated for "%s" was set aside in "%s.rejected": %s', $description, $path, $exception->getMessage()), 0, $exception);
+        }
+
         fs()->dumpFile($path, $code);
 
         return $path;
+    }
+
+    /**
+     * The generated migration is reworked with regular expressions on the Doctrine Migrations template: check the
+     * result regardless of them, so a template they no longer match fails instead of leaving the migration unfixed.
+     *
+     * @param list<string> $tables              regular expressions of the table names
+     * @param list<string> $forgottenMigrations
+     *
+     * @throws \RuntimeException when the migration is not the expected one
+     */
+    public static function checkPluginMigration(string $code, array $tables, string $description, array $forgottenMigrations = []): void
+    {
+        $errors = [];
+
+        if (!str_contains($code, var_export($description, true))) {
+            $errors[] = 'its description is not set';
+        }
+
+        preg_match_all('/\bSEQUENCE\s+(?:IF\s+EXISTS\s+)?[`"]?(\w+)/i', $code, $sequences);
+        $allowed = \sprintf('/^(%s)_id_seq$/i', implode('|', $tables ?: ['(?!)']));
+
+        foreach (array_unique($sequences[1]) as $sequence) {
+            if (!preg_match($allowed, $sequence)) {
+                $errors[] = \sprintf('it changes the sequence "%s" of another table', $sequence);
+            }
+        }
+
+        // The statements of each method: a "function" line starts a new one.
+        $methods = [];
+        $method = null;
+
+        foreach (explode("\n", $code) as $line) {
+            if (preg_match('/\bfunction\s+(\w+)\s*\(/', $line, $matches)) {
+                $method = $matches[1];
+            } elseif (null !== $method && str_contains($line, 'addSql(')) {
+                $methods[$method][] = $line;
+            }
+        }
+
+        if (!str_contains($code, 'function up(') || !str_contains($code, 'function down(')) {
+            $errors[] = 'its up() and down() methods are not found';
+        }
+
+        foreach ($methods as $name => $statements) {
+            $dropped = false;
+
+            foreach ($statements as $statement) {
+                if (preg_match('/DROP\s+TABLE/i', $statement)) {
+                    $dropped = true;
+                } elseif ($dropped && !preg_match('/DELETE\s+FROM/i', $statement)) {
+                    $errors[] = \sprintf('%s() drops a table before other statements', $name);
+
+                    break;
+                }
+            }
+        }
+
+        $drops = preg_grep('/DROP\s+TABLE|ALTER\s+TABLE\s+\w+\s+DROP\s+(?!CONSTRAINT|FOREIGN\s+KEY|INDEX|PRIMARY)/i', $methods['up'] ?? []);
+
+        if ([] !== $drops && !str_contains($code, 'skipIf(')) {
+            $errors[] = 'up() drops tables or columns without skipping where they do not exist';
+        }
+
+        foreach ($forgottenMigrations as $migration) {
+            if (!str_contains($code, var_export($migration, true))) {
+                $errors[] = \sprintf('it does not forget the migration "%s"', $migration);
+            }
+        }
+
+        if ([] !== $errors) {
+            throw new \RuntimeException(implode(', ', $errors) . '.');
+        }
     }
 
     /**
